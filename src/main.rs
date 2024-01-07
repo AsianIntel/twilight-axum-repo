@@ -16,16 +16,19 @@ use tower_http::{
     auth::{AsyncAuthorizeRequest, AsyncRequireAuthorizationLayer},
     trace::TraceLayer,
 };
+use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter, Layer as _};
 use twilight_http::Client as TwilightClient;
 use twilight_model::{
     application::interaction::{Interaction, InteractionData, InteractionType},
-    http::interaction::{InteractionResponse, InteractionResponseData, InteractionResponseType},
+    http::interaction::{InteractionResponse, InteractionResponseType},
 };
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     dotenvy::dotenv().unwrap();
-    tracing_subscriber::fmt::init();
+    tracing_subscriber::registry()
+        .with(tracing_subscriber::fmt::layer().with_filter(EnvFilter::from_default_env()))
+        .init();
 
     let bot_token = std::env::var("BOT_TOKEN").expect("expected the bot token");
     let discord_public_key =
@@ -62,18 +65,18 @@ async fn pong() -> Json<InteractionResponse> {
 async fn rewrite_request_uri(req: Request) -> Request {
     let (mut parts, body) = req.into_parts();
     let bytes = axum::body::to_bytes(body, usize::MAX).await.unwrap();
-    let interaction = serde_json::from_slice::<Interaction>(&bytes).unwrap();
-
-    if interaction.kind == InteractionType::ApplicationCommand {
-        let data = match interaction.data {
-            Some(InteractionData::ApplicationCommand(data)) => data,
-            _ => unreachable!(),
-        };
-        let command_name = data.name;
-        let mut uri_parts = parts.uri.into_parts();
-        uri_parts.path_and_query = Some(format!("/{command_name}").parse().unwrap());
-        let new_uri = Uri::from_parts(uri_parts).unwrap();
-        parts.uri = new_uri;
+    if let Ok(interaction) = serde_json::from_slice::<Interaction>(&bytes) {
+        if interaction.kind == InteractionType::ApplicationCommand {
+            let data = match interaction.data {
+                Some(InteractionData::ApplicationCommand(data)) => data,
+                _ => unreachable!(),
+            };
+            let command_name = data.name;
+            let mut uri_parts = parts.uri.into_parts();
+            uri_parts.path_and_query = Some(format!("/{command_name}").parse().unwrap());
+            let new_uri = Uri::from_parts(uri_parts).unwrap();
+            parts.uri = new_uri;
+        }
     }
 
     let body = Body::from(bytes);
@@ -136,6 +139,7 @@ impl AsyncAuthorizeRequest<Body> for WebhookAuth {
     }
 }
 
+#[tracing::instrument(skip_all)]
 async fn verify_func(
     http: Extension<Arc<TwilightClient>>,
     interaction: Json<Interaction>,
@@ -147,11 +151,8 @@ async fn verify_func(
             interaction.id,
             &interaction.token,
             &InteractionResponse {
-                kind: InteractionResponseType::ChannelMessageWithSource,
-                data: Some(InteractionResponseData {
-                    content: Some("test".into()),
-                    ..Default::default()
-                }),
+                kind: InteractionResponseType::DeferredChannelMessageWithSource,
+                data: None,
             },
         )
         .await
@@ -159,14 +160,15 @@ async fn verify_func(
         tracing::error!(err = ?err);
     }
 
-    let guild = http
-        .guild(interaction.guild_id.unwrap())
-        .await
+    if let Err(err) = http
+        .interaction(interaction.application_id)
+        .update_response(&interaction.token)
+        .content(Some("test"))
         .unwrap()
-        .model()
         .await
-        .unwrap();
-    tracing::info!(guild = ?guild);
+    {
+        tracing::error!(err = ?err);
+    }
 
     StatusCode::OK
 }
