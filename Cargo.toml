@@ -1,0 +1,20 @@
+[package]
+name = "test3"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+axum = { version = "0.7" }
+dotenvy = { version = "0.15" }
+ed25519-dalek = { version = "2" }
+hex = { version = "0.4" }
+serde_json = { version = "1" }
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+tower = { version = "0.4" }
+tower-http = { version = "0.5", features = ["auth", "trace"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+twilight-model = { branch = "main", git = "https://github.com/twilight-rs/twilight" }
+twilight-http = { branch = "main", git = "https://github.com/twilight-rs/twilight", default-features = false, features = ["rustls-webpki-roots"] }
